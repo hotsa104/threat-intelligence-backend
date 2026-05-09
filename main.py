@@ -81,7 +81,6 @@ app = FastAPI(
 )
 
 # === CORS ===
-# Allow Vercel frontend + localhost for development
 cors_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -91,9 +90,13 @@ if settings.frontend_url:
 if settings.env == "development":
     cors_origins.append("*")
 
+# FRONTEND_URL 未設定時でも Vercel / Render プレビュー URL を許可
+_cors_origin_regex = r"https://.*\.(vercel\.app|onrender\.com)$"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

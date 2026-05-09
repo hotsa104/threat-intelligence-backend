@@ -8,6 +8,8 @@ services:
     envVars:
       - key: NVD_API_KEY
         sync: false
+      - key: GITHUB_API_TOKEN
+        sync: false
       - key: LOG_LEVEL
         value: INFO
       - key: FRONTEND_URL

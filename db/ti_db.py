@@ -204,6 +204,20 @@ def get_existing_cve_ids(db_path: Path = _DB_PATH) -> set[str]:
     return {r[0] for r in rows}
 
 
+def get_cve_ids_without_github_refs(limit: int = 50, db_path: Path = _DB_PATH) -> set[str]:
+    """GitHub PoC リンクが未取得の CVE ID を返す（差分取得用）。"""
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """SELECT cve_id FROM cve_entries
+               WHERE cve_id NOT IN (
+                   SELECT DISTINCT cve_id FROM cve_references WHERE type = 'github'
+               )
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return {r[0] for r in rows}
+
+
 def get_unenriched_ids(limit: int = 100, db_path: Path = _DB_PATH) -> set[str]:
     """CVSS スコアが未取得のエントリの CVE ID を返す（NVD 再エンリッチ用）。"""
     with get_conn(db_path) as conn:

@@ -12,6 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import settings
 from db.ti_db import (
+    get_cve_ids_without_github_refs,
     get_existing_cve_ids,
     get_unenriched_ids,
     init_db,
@@ -82,13 +83,14 @@ async def run_sync() -> None:
     log_sync(added, updated, "ok")
     logger.info(f"✅ Sync done: added={added}, updated={updated}")
 
-    # ─── GitHub Exploit PoC リンク取得（Phase 2）─────────────────
+    # ─── GitHub Exploit PoC リンク取得（差分のみ）────────────────
     try:
-        all_cve_ids = [e.get("cveID") for e in kev_entries if e.get("cveID")]
-        if all_cve_ids:
-            logger.info(f"🔍 Fetching GitHub exploits for {len(all_cve_ids)} CVEs...")
+        # GitHub refs 未取得の CVE のみ対象（50件/サイクル）
+        github_target_ids = list(get_cve_ids_without_github_refs(limit=50))
+        if github_target_ids:
+            logger.info(f"🔍 Fetching GitHub exploits for {len(github_target_ids)} new CVEs...")
             github_exploits = await fetch_github_exploits_batch(
-                all_cve_ids,
+                github_target_ids,
                 github_token=settings.github_api_token,
             )
             refs_count = 0
@@ -109,15 +111,15 @@ async def run_sync() -> None:
     except Exception as e:
         logger.warning(f"⚠️ GitHub exploit fetch failed: {e}")
 
-    # ─── RSS フィード記事取得（Phase 2）──────────────────────
+    # ─── RSS フィード記事取得（新規 CVE のみ）────────────────
     try:
-        all_cve_ids = [e.get("cveID") for e in kev_entries if e.get("cveID")]
-        if all_cve_ids:
-            logger.info(f"📰 Fetching RSS articles for {len(all_cve_ids)} CVEs...")
+        rss_target_ids = [e.get("cveID") for e in new_entries if e.get("cveID")][:50]
+        if rss_target_ids:
+            logger.info(f"📰 Fetching RSS articles for {len(rss_target_ids)} new CVEs...")
             import httpx
             async with httpx.AsyncClient(timeout=30.0) as client:
                 refs_count = 0
-                for cve_id in all_cve_ids[:50]:  # RSS は最初の50件のみ（時間制限）
+                for cve_id in rss_target_ids:
                     articles = await fetch_rss_feeds_for_cve(cve_id, client)
                     refs = [
                         {
