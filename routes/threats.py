@@ -69,7 +69,7 @@ async def list_threats(
     offset: int = Query(default=0, ge=0),
 ):
     """
-    X Threats リストを返す（Elasticsearch から取得）
+    X Threats リストを返す（モックデータ）
 
     パラメータ:
     - keyword: キーワードフィルタ
@@ -78,78 +78,33 @@ async def list_threats(
     - limit: 1回あたりのレコード数（デフォルト50）
     - offset: ページネーション
     """
-    from main import es_local_client
-
-    if not es_local_client:
-        raise HTTPException(status_code=503, detail="ES client not initialized")
-
-    # === ES クエリ構築 ===
-    must_clauses = []
+    # === Mock Data Mode (Fast Return) ===
+    filtered = MOCK_THREATS[:]
 
     if keyword:
-        must_clauses.append({"match": {"keywords": keyword}})
+        filtered = [
+            t for t in filtered
+            if any(keyword.lower() in kw.lower() for kw in t.get("keywords", []))
+        ]
 
     if cve:
-        must_clauses.append({"term": {"cves": cve}})
+        filtered = [
+            t for t in filtered
+            if cve in t.get("cves", [])
+        ]
 
     if query:
-        must_clauses.append({"match": {"text": {"query": query}}})
+        filtered = [
+            t for t in filtered
+            if query.lower() in t.get("text", "").lower()
+        ]
 
-    es_query = {
-        "bool": {"must": must_clauses}
-    } if must_clauses else {"match_all": {}}
+    total = len(filtered)
+    data = filtered[offset : offset + limit]
 
-    body = {
-        "query": es_query,
-        "from": offset,
-        "size": limit,
-        "sort": [{"timestamp": {"order": "desc"}}],
+    return {
+        "total": total,
+        "count": len(data),
+        "offset": offset,
+        "data": data,
     }
-
-    try:
-        response = await es_local_client.post(
-            f"{settings.local_es_url}/threats/_search",
-            json=body,
-        )
-        result = response.json()
-        hits = result.get("hits", {})
-
-        return {
-            "total": hits.get("total", {}).get("value", 0),
-            "count": len(hits.get("hits", [])),
-            "offset": offset,
-            "data": [hit["_source"] for hit in hits.get("hits", [])],
-        }
-    except Exception as e:
-        logger.warning(f"ES threats query failed: {e}. Using mock data for development.")
-
-        # === Development Mode: Return Mock Data ===
-        filtered = MOCK_THREATS[:]
-
-        if keyword:
-            filtered = [
-                t for t in filtered
-                if any(keyword.lower() in kw.lower() for kw in t.get("keywords", []))
-            ]
-
-        if cve:
-            filtered = [
-                t for t in filtered
-                if cve in t.get("cves", [])
-            ]
-
-        if query:
-            filtered = [
-                t for t in filtered
-                if query.lower() in t.get("text", "").lower()
-            ]
-
-        total = len(filtered)
-        data = filtered[offset : offset + limit]
-
-        return {
-            "total": total,
-            "count": len(data),
-            "offset": offset,
-            "data": data,
-        }
