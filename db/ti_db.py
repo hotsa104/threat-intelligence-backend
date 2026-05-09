@@ -5,6 +5,7 @@ cve_entries テーブル: CISA KEV + NVD/EPSS エンリッチ済みデータ
 sync_log テーブル: 同期履歴
 """
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -13,7 +14,8 @@ from typing import Any, Generator, Optional
 
 logger = logging.getLogger(__name__)
 
-_DB_PATH = Path(__file__).parent.parent / "data" / "ti_dashboard.db"
+# Render 永続ディスクは DB_PATH 環境変数で指定、なければローカルの data/ を使用
+_DB_PATH = Path(os.environ.get("DB_PATH", str(Path(__file__).parent.parent / "data" / "ti_dashboard.db")))
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS cve_entries (

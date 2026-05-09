@@ -10,11 +10,17 @@ services:
         sync: false
       - key: LOG_LEVEL
         value: INFO
-      - key: DATABASE_URL
-        value: sqlite:///ti_vulnerabilities.db
       - key: FRONTEND_URL
         sync: false
+      - key: ENV
+        value: production
+      - key: FASTAPI_RELOAD
+        value: "false"
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: DB_PATH
+        value: /opt/render/data/ti_dashboard.db
     disk:
       name: ti-db
-      mountPath: /opt/render
-      sizeGB: 5
+      mountPath: /opt/render/data
+      sizeGB: 1

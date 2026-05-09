@@ -15,7 +15,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
-from db.ti_db import init_db
+from db.ti_db import init_db, get_priority_counts, get_last_sync
+from services.ti_scheduler import run_sync
 from routes.vulnerabilities import router as vuln_router
 from routes.threats import router as threats_router
 from services.ti_scheduler import start_scheduler, stop_scheduler
@@ -145,32 +146,48 @@ async def es_health():
 # === Placeholder Routes (for Phase A structure) ===
 @app.get("/api/stats/summary")
 async def stats_summary():
-    """GET /api/stats/summary - Phase 7 implementation"""
+    """GET /api/stats/summary — 優先度別件数 + T-pot 攻撃数サマリー"""
+    counts = get_priority_counts()
+    total = sum(counts.values())
+    last_sync = get_last_sync()
     return {
-        "critical_count": 0,
-        "tpot_attacks_24h": 0,
-        "kev_count": 0,
-        "message": "Not implemented yet (Phase 7)",
+        "kev_count": total,
+        "critical_count": counts.get("CRITICAL", 0),
+        "high_count": counts.get("HIGH", 0),
+        "medium_count": counts.get("MEDIUM", 0),
+        "low_count": counts.get("LOW", 0),
+        "tpot_attacks_24h": 0,  # Phase 6（honeypot_service）実装後に更新
+        "last_sync": last_sync,
     }
 
 
 @app.get("/api/honeypot/stats")
 async def honeypot_stats():
-    """GET /api/honeypot/stats - Phase 6 implementation"""
+    """GET /api/honeypot/stats — SSH トンネル接続時に T-pot データを返す（Phase 6）"""
+    # Phase 6 (SSH tunnel + T-pot) 実装前は unavailable を返す
     return {
-        "top_ports": [],
+        "available": False,
         "total": 0,
-        "message": "Not implemented yet (Phase 6)",
+        "top_ports": [],
+        "message": "SSH tunnel not connected (Phase 6)",
     }
 
 
 @app.post("/api/refresh")
 async def manual_refresh():
-    """POST /api/refresh - Phase 8 implementation"""
-    return {
-        "status": "Not implemented yet (Phase 8)",
-        "message": "Manual refresh trigger",
-    }
+    """POST /api/refresh — CISA KEV → NVD エンリッチ → DB upsert を即時実行"""
+    try:
+        await run_sync()
+        last = get_last_sync()
+        return {
+            "status": "ok",
+            "added": last["entries_added"] if last else 0,
+            "updated": last["entries_updated"] if last else 0,
+            "run_at": last["run_at"] if last else None,
+        }
+    except Exception as e:
+        logger.error(f"Manual refresh failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
