@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS sync_log (
     entries_updated INTEGER DEFAULT 0,
     status          TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_priority ON cve_entries(priority);
+CREATE INDEX IF NOT EXISTS idx_enriched ON cve_entries(enriched_at);
 """
 
 
