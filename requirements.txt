@@ -1,0 +1,25 @@
+# === Core Framework ===
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-dotenv==1.0.0
+aiofiles==23.2.1
+
+# === Async HTTP Client ===
+httpx==0.25.1
+
+# === Configuration ===
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+
+# === Day 2: SSH Tunnel ===
+# sshtunnel==0.4.0  # Uncomment on Day 2
+
+# === Day 5: Elasticsearch ===
+# elasticsearch==8.10.2  # Uncomment on Day 5
+
+# === Scheduler ===
+APScheduler==3.10.4
+
+# === Development ===
+# pytest==7.4.3  # Uncomment for testing
+# httpx[testing]==0.25.1  # Uncomment for testing

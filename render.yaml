@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: threat-intelligence-api
+    runtime: python
+    pythonVersion: 3.11
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: NVD_API_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        value: sqlite:///ti_vulnerabilities.db
+      - key: FRONTEND_URL
+        sync: false
+    disk:
+      name: ti-db
+      mountPath: /opt/render
+      sizeGB: 5

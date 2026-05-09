@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Threat Intelligence Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      padding: 0.9rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: 0.04em; }
+    header h1 span { color: #38bdf8; }
+    #sync-info { font-size: 0.75rem; color: #64748b; }
+
+    /* ── KPI Cards ── */
+    #kpi-row {
+      display: flex;
+      gap: 1rem;
+      padding: 1.2rem 2rem 0.8rem;
+      flex-wrap: wrap;
+    }
+    .kpi-card {
+      flex: 1 1 120px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 0.9rem 1.1rem;
+      min-width: 110px;
+    }
+    .kpi-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; color: #64748b; text-transform: uppercase; }
+    .kpi-value { font-size: 1.8rem; font-weight: 700; line-height: 1.2; margin-top: 0.2rem; }
+    .kpi-CRITICAL .kpi-value { color: #fca5a5; }
+    .kpi-HIGH     .kpi-value { color: #fcd34d; }
+    .kpi-MEDIUM   .kpi-value { color: #86efac; }
+    .kpi-LOW      .kpi-value { color: #93c5fd; }
+    .kpi-total    .kpi-value { color: #e2e8f0; }
+
+    /* ── Distribution bar ── */
+    #dist-section {
+      padding: 0.5rem 2rem 1rem;
+    }
+    #dist-section h2 { font-size: 0.75rem; color: #64748b; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.5rem; }
+    #dist-bar {
+      display: flex;
+      height: 18px;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #1e293b;
+      gap: 2px;
+    }
+    .dist-seg {
+      transition: width 0.4s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+      font-weight: 700;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .dist-CRITICAL { background: #7f1d1d; color: #fca5a5; }
+    .dist-HIGH     { background: #78350f; color: #fcd34d; }
+    .dist-MEDIUM   { background: #14532d; color: #86efac; }
+    .dist-LOW      { background: #1e3a5f; color: #93c5fd; }
+
+    /* ── Controls ── */
+    #controls {
+      padding: 0.6rem 2rem;
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: center;
+      border-top: 1px solid #1e293b;
+    }
+
+    select, button {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    button:hover { background: #334155; }
+    button#btn-refresh { background: #0284c7; border-color: #0284c7; }
+    button#btn-refresh:hover { background: #0369a1; }
+    button#btn-csv { background: #059669; border-color: #059669; }
+    button#btn-csv:hover { background: #047857; }
+
+    #status { font-size: 0.8rem; color: #94a3b8; margin-left: auto; }
+
+    /* ── Table ── */
+    .table-wrap {
+      padding: 0 2rem 1rem;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    thead th {
+      background: #1e293b;
+      padding: 0.6rem 0.8rem;
+      text-align: left;
+      font-weight: 600;
+      color: #94a3b8;
+      border-bottom: 2px solid #334155;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    thead th:hover { color: #38bdf8; }
+    thead th .sort-icon { margin-left: 4px; font-size: 0.7rem; }
+
+    tbody tr { border-bottom: 1px solid #1e293b; }
+    tbody tr:hover { background: #1e293b55; }
+    tbody td { padding: 0.55rem 0.8rem; vertical-align: top; }
+
+    td.cve-id { font-family: monospace; white-space: nowrap; color: #38bdf8; }
+    td.desc { max-width: 380px; line-height: 1.4; color: #cbd5e1; }
+    td.date { white-space: nowrap; color: #94a3b8; font-size: 0.8rem; }
+
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .badge-CRITICAL { background: #7f1d1d; color: #fca5a5; }
+    .badge-HIGH     { background: #78350f; color: #fcd34d; }
+    .badge-MEDIUM   { background: #14532d; color: #86efac; }
+    .badge-LOW      { background: #1e3a5f; color: #93c5fd; }
+
+    .epss { font-family: monospace; text-align: right; white-space: nowrap; }
+    .cvss { font-family: monospace; text-align: right; white-space: nowrap; }
+
+    /* ── Pagination ── */
+    #pagination {
+      padding: 0.8rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+    #pagination button { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+    #pagination button:disabled { opacity: 0.3; cursor: default; }
+
+    /* ── Loading ── */
+    #loading {
+      text-align: center;
+      padding: 3rem;
+      color: #94a3b8;
+      display: none;
+    }
+    .spinner {
+      display: inline-block;
+      width: 22px; height: 22px;
+      border: 3px solid #334155;
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 0.5rem;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #empty-msg { text-align: center; padding: 2rem; color: #64748b; display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Threat <span>Intelligence</span> Dashboard</h1>
+  <span id="sync-info">同期情報を読み込み中...</span>
+</header>
+
+<!-- KPI Cards -->
+<div id="kpi-row">
+  <div class="kpi-card kpi-CRITICAL">
+    <div class="kpi-label">CRITICAL</div>
+    <div class="kpi-value" id="kpi-critical">—</div>
+  </div>
+  <div class="kpi-card kpi-HIGH">
+    <div class="kpi-label">HIGH</div>
+    <div class="kpi-value" id="kpi-high">—</div>
+  </div>
+  <div class="kpi-card kpi-MEDIUM">
+    <div class="kpi-label">MEDIUM</div>
+    <div class="kpi-value" id="kpi-medium">—</div>
+  </div>
+  <div class="kpi-card kpi-LOW">
+    <div class="kpi-label">LOW</div>
+    <div class="kpi-value" id="kpi-low">—</div>
+  </div>
+  <div class="kpi-card kpi-total">
+    <div class="kpi-label">TOTAL KEV</div>
+    <div class="kpi-value" id="kpi-total">—</div>
+  </div>
+</div>
+
+<!-- Distribution Bar -->
+<div id="dist-section">
+  <h2>優先度分布</h2>
+  <div id="dist-bar">
+    <div class="dist-seg dist-CRITICAL" id="dist-CRITICAL" style="width:0%"></div>
+    <div class="dist-seg dist-HIGH"     id="dist-HIGH"     style="width:0%"></div>
+    <div class="dist-seg dist-MEDIUM"   id="dist-MEDIUM"   style="width:0%"></div>
+    <div class="dist-seg dist-LOW"      id="dist-LOW"      style="width:0%"></div>
+  </div>
+</div>
+
+<!-- Controls -->
+<div id="controls">
+  <button id="btn-refresh">更新</button>
+  <select id="sel-priority">
+    <option value="">全優先度</option>
+    <option value="CRITICAL">CRITICAL</option>
+    <option value="HIGH">HIGH</option>
+    <option value="MEDIUM">MEDIUM</option>
+    <option value="LOW">LOW</option>
+  </select>
+  <select id="sel-limit">
+    <option value="50">50 件</option>
+    <option value="100" selected>100 件</option>
+    <option value="200">200 件</option>
+    <option value="500">500 件</option>
+  </select>
+  <button id="btn-csv">CSV ダウンロード</button>
+  <span id="status">—</span>
+</div>
+
+<div id="loading"><span class="spinner"></span>読み込み中...</div>
+<div id="empty-msg">データがありません。同期完了後に更新してください。</div>
+
+<div class="table-wrap">
+  <table id="vuln-table">
+    <thead>
+      <tr>
+        <th data-col="cveID">CVE ID <span class="sort-icon"></span></th>
+        <th data-col="priority">優先度 <span class="sort-icon"></span></th>
+        <th data-col="epss_score">EPSS <span class="sort-icon"></span></th>
+        <th data-col="cvss_score">CVSS <span class="sort-icon"></span></th>
+        <th data-col="vulnerabilityName">脆弱性名 <span class="sort-icon"></span></th>
+        <th data-col="dateAdded">KEV 追加日 <span class="sort-icon"></span></th>
+        <th data-col="shortDescription">説明</th>
+      </tr>
+    </thead>
+    <tbody id="vuln-tbody"></tbody>
+  </table>
+</div>
+
+<!-- Pagination -->
+<div id="pagination">
+  <button id="btn-prev" disabled>← 前へ</button>
+  <span id="page-info">—</span>
+  <button id="btn-next" disabled>次へ →</button>
+</div>
+
+<script>
+  let allData = [];
+  let sortCol = 'epss_score';
+  let sortAsc = false;
+  let currentOffset = 0;
+  let currentTotal = 0;
+
+  const tbody = document.getElementById('vuln-tbody');
+  const status = document.getElementById('status');
+  const loading = document.getElementById('loading');
+  const emptyMsg = document.getElementById('empty-msg');
+
+  document.getElementById('btn-refresh').addEventListener('click', () => {
+    currentOffset = 0;
+    loadData();
+    loadStats();
+  });
+  document.getElementById('btn-csv').addEventListener('click', downloadCSV);
+  document.getElementById('btn-prev').addEventListener('click', () => {
+    const limit = Number(document.getElementById('sel-limit').value);
+    currentOffset = Math.max(0, currentOffset - limit);
+    loadData();
+  });
+  document.getElementById('btn-next').addEventListener('click', () => {
+    const limit = Number(document.getElementById('sel-limit').value);
+    currentOffset += limit;
+    loadData();
+  });
+
+  document.getElementById('sel-priority').addEventListener('change', () => {
+    currentOffset = 0;
+    loadData();
+  });
+  document.getElementById('sel-limit').addEventListener('change', () => {
+    currentOffset = 0;
+    loadData();
+  });
+
+  document.querySelectorAll('thead th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) sortAsc = !sortAsc;
+      else { sortCol = col; sortAsc = false; }
+      renderTable(allData);
+    });
+  });
+
+  async function loadStats() {
+    try {
+      const res = await fetch('/api/vulnerabilities/stats');
+      if (!res.ok) return;
+      const json = await res.json();
+      const counts = json.priority_counts || {};
+      const total = json.total || 0;
+
+      document.getElementById('kpi-critical').textContent = (counts.CRITICAL ?? 0).toLocaleString();
+      document.getElementById('kpi-high').textContent     = (counts.HIGH     ?? 0).toLocaleString();
+      document.getElementById('kpi-medium').textContent   = (counts.MEDIUM   ?? 0).toLocaleString();
+      document.getElementById('kpi-low').textContent      = (counts.LOW      ?? 0).toLocaleString();
+      document.getElementById('kpi-total').textContent    = total.toLocaleString();
+
+      // Distribution bar
+      if (total > 0) {
+        for (const p of ['CRITICAL','HIGH','MEDIUM','LOW']) {
+          const pct = ((counts[p] ?? 0) / total * 100).toFixed(1);
+          const seg = document.getElementById('dist-' + p);
+          seg.style.width = pct + '%';
+          seg.title = `${p}: ${counts[p] ?? 0} (${pct}%)`;
+          if (pct > 5) seg.textContent = pct + '%';
+          else seg.textContent = '';
+        }
+      }
+
+      // Sync info
+      const ls = json.last_sync;
+      if (ls) {
+        const t = ls.run_at ? new Date(ls.run_at).toLocaleString('ja-JP') : '—';
+        document.getElementById('sync-info').textContent =
+          `最終同期: ${t}  追加: +${ls.entries_added}  更新: ${ls.entries_updated}`;
+      } else {
+        document.getElementById('sync-info').textContent = '未同期（起動後に自動同期）';
+      }
+    } catch (e) {
+      console.error('stats error:', e);
+    }
+  }
+
+  async function loadData() {
+    const priority = document.getElementById('sel-priority').value;
+    const limit = Number(document.getElementById('sel-limit').value);
+    const params = new URLSearchParams({ limit, offset: currentOffset });
+    if (priority) params.set('priority', priority);
+
+    loading.style.display = 'block';
+    emptyMsg.style.display = 'none';
+    tbody.innerHTML = '';
+    status.textContent = '取得中...';
+
+    try {
+      const res = await fetch(`/api/vulnerabilities/list?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      allData = json.data || [];
+      currentTotal = json.total || 0;
+
+      if (allData.length === 0) {
+        emptyMsg.style.display = 'block';
+        status.textContent = 'データなし';
+      } else {
+        status.textContent = `${currentOffset + 1}–${currentOffset + allData.length} 件 / 全 ${currentTotal.toLocaleString()} 件`;
+        renderTable(allData);
+      }
+      updatePagination(limit);
+    } catch (e) {
+      status.textContent = `エラー: ${e.message}`;
+    } finally {
+      loading.style.display = 'none';
+    }
+  }
+
+  function updatePagination(limit) {
+    const prevBtn = document.getElementById('btn-prev');
+    const nextBtn = document.getElementById('btn-next');
+    const pageInfo = document.getElementById('page-info');
+    const currentPage = Math.floor(currentOffset / limit) + 1;
+    const totalPages = Math.ceil(currentTotal / limit);
+    pageInfo.textContent = `${currentPage} / ${totalPages} ページ`;
+    prevBtn.disabled = currentOffset === 0;
+    nextBtn.disabled = currentOffset + limit >= currentTotal;
+  }
+
+  function renderTable(data) {
+    const sorted = [...data].sort((a, b) => {
+      let av = a[sortCol] ?? '';
+      let bv = b[sortCol] ?? '';
+      if (sortCol === 'priority') {
+        const order = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+        av = order[av] ?? 4; bv = order[bv] ?? 4;
+      } else if (typeof av === 'number' || typeof bv === 'number') {
+        av = Number(av) || 0; bv = Number(bv) || 0;
+      } else {
+        av = String(av).toLowerCase(); bv = String(bv).toLowerCase();
+      }
+      if (av < bv) return sortAsc ? -1 : 1;
+      if (av > bv) return sortAsc ? 1 : -1;
+      return 0;
+    });
+
+    document.querySelectorAll('thead th .sort-icon').forEach(el => el.textContent = '');
+    const activeHeader = document.querySelector(`thead th[data-col="${sortCol}"] .sort-icon`);
+    if (activeHeader) activeHeader.textContent = sortAsc ? '▲' : '▼';
+
+    tbody.innerHTML = sorted.map(v => `
+      <tr>
+        <td class="cve-id">${esc(v.cveID ?? '')}</td>
+        <td><span class="badge badge-${v.priority ?? 'LOW'}">${esc(v.priority ?? 'LOW')}</span></td>
+        <td class="epss">${v.epss_score != null ? Number(v.epss_score).toFixed(4) : '—'}</td>
+        <td class="cvss">${v.cvss_score != null ? Number(v.cvss_score).toFixed(1) : '—'}</td>
+        <td>${esc(v.vulnerabilityName ?? '')}</td>
+        <td class="date">${esc(v.dateAdded ?? '')}</td>
+        <td class="desc">${esc(v.shortDescription ?? '')}</td>
+      </tr>
+    `).join('');
+  }
+
+  function downloadCSV() {
+    if (!allData.length) return;
+    const cols = ['cveID','priority','epss_score','cvss_score','vulnerabilityName','dateAdded','shortDescription'];
+    const header = cols.join(',');
+    const rows = allData.map(v =>
+      cols.map(c => `"${String(v[c] ?? '').replace(/"/g,'""')}"`).join(',')
+    );
+    const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `cisa-kev-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // 起動時に自動取得
+  loadStats();
+  loadData();
+</script>
+</body>
+</html>
