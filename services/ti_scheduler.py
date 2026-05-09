@@ -53,6 +53,13 @@ async def run_sync() -> None:
         f"new={len(new_entries)}, unenriched_batch={len(unenriched_entries)}"
     )
 
+    # ─── 即時保存: 新規エントリを NVD エンリッチ前に DB へ保存 ──────────────
+    # フロントエンドにすぐデータを表示するため、スコアなしで先に upsert する
+    if new_entries:
+        pre_added, _ = upsert_entries(new_entries)
+        log_sync(pre_added, 0, "partial")
+        logger.info(f"✅ Pre-saved {pre_added} new KEV entries (enrichment pending)")
+
     # 新規 + CVSS 未取得エントリを NVD エンリッチ
     if entries_to_enrich:
         try:
