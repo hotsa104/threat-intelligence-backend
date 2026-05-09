@@ -17,9 +17,11 @@ from db.ti_db import (
     init_db,
     log_sync,
     upsert_entries,
+    upsert_references,
 )
 from fetchers.ti_kev_fetcher import fetch_cisa_kev
 from fetchers.ti_nvd_client import enrich_with_nvd
+from fetchers.ti_github_fetcher import fetch_github_exploits_batch
 from services.ti_scoring import score_all
 
 logger = logging.getLogger(__name__)
@@ -78,6 +80,33 @@ async def run_sync() -> None:
     added, updated = upsert_entries(scored + existing_entries)
     log_sync(added, updated, "ok")
     logger.info(f"✅ Sync done: added={added}, updated={updated}")
+
+    # ─── GitHub Exploit PoC リンク取得（Phase 2）─────────────────
+    try:
+        all_cve_ids = [e.get("cveID") for e in kev_entries if e.get("cveID")]
+        if all_cve_ids:
+            logger.info(f"🔍 Fetching GitHub exploits for {len(all_cve_ids)} CVEs...")
+            github_exploits = await fetch_github_exploits_batch(
+                all_cve_ids,
+                github_token=settings.github_api_token,
+            )
+            refs_count = 0
+            for cve_id, exploits in github_exploits.items():
+                refs = [
+                    {
+                        "type": "github",
+                        "title": exp["title"],
+                        "url": exp["url"],
+                        "source": "github",
+                        "metadata": f"stars:{exp.get('stars', 0)}",
+                    }
+                    for exp in exploits
+                ]
+                if refs:
+                    refs_count += upsert_references(cve_id, refs)
+            logger.info(f"✅ GitHub: {refs_count} exploit links stored")
+    except Exception as e:
+        logger.warning(f"⚠️ GitHub exploit fetch failed: {e}")
 
 
 def start_scheduler() -> AsyncIOScheduler:

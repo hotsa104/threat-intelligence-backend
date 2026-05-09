@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from config import settings
-from db.ti_db import get_last_sync, get_priority_counts, query_entries
+from db.ti_db import get_last_sync, get_priority_counts, query_entries, get_references
 from fetchers.ti_kev_fetcher import fetch_cisa_kev
 from fetchers.ti_nvd_client import enrich_with_nvd
 from services.ti_scoring import score_all
@@ -113,4 +113,15 @@ async def list_vulnerabilities(
         "total": len(scored),
         "offset": offset,
         "data": page,
+    }
+
+
+@router.get("/{cve_id}/references")
+async def get_cve_references(cve_id: str):
+    """CVE の関連リンク（GitHub PoC・記事・アドバイザリ）を返す。"""
+    references = get_references(cve_id)
+    return {
+        "cve_id": cve_id,
+        "count": len(references),
+        "references": references,
     }

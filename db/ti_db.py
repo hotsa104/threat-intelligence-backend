@@ -44,8 +44,22 @@ CREATE TABLE IF NOT EXISTS sync_log (
     status          TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS cve_references (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    cve_id          TEXT NOT NULL,
+    type            TEXT NOT NULL,
+    title           TEXT,
+    url             TEXT NOT NULL,
+    source          TEXT,
+    metadata        TEXT,
+    fetched_at      TEXT,
+    FOREIGN KEY (cve_id) REFERENCES cve_entries(cve_id),
+    UNIQUE (cve_id, url)
+);
+
 CREATE INDEX IF NOT EXISTS idx_priority ON cve_entries(priority);
 CREATE INDEX IF NOT EXISTS idx_enriched ON cve_entries(enriched_at);
+CREATE INDEX IF NOT EXISTS idx_cve_references ON cve_references(cve_id);
 """
 
 
@@ -219,3 +233,56 @@ def get_last_sync(db_path: Path = _DB_PATH) -> Optional[dict]:
             "SELECT * FROM sync_log ORDER BY id DESC LIMIT 1"
         ).fetchone()
     return dict(row) if row else None
+
+
+# ─── CVE References（関連リンク）────────────────────────────
+def upsert_references(
+    cve_id: str,
+    references: list[dict[str, Any]],
+    db_path: Path = _DB_PATH,
+) -> int:
+    """CVE の関連リンクを upsert し、追加・更新件数を返す。
+
+    Args:
+        cve_id: CVE ID
+        references: [{"type": "github"/"article"/"advisory", "title": "...", "url": "...", ...}, ...]
+
+    Returns:
+        upserted count
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    upserted = 0
+
+    with get_conn(db_path) as conn:
+        for ref in references:
+            ref_type = ref.get("type", "unknown")
+            url = ref.get("url", "")
+            if not url:
+                continue
+
+            title = ref.get("title", "")
+            source = ref.get("source")
+            metadata = ref.get("metadata")
+
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO cve_references
+                        (cve_id, type, title, url, source, metadata, fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (cve_id, ref_type, title, url, source, metadata, now),
+                )
+                upserted += 1
+            except Exception as e:
+                logger.warning(f"Failed to upsert reference for {cve_id}: {e}")
+
+    return upserted
+
+
+def get_references(cve_id: str, db_path: Path = _DB_PATH) -> list[dict]:
+    """CVE の関連リンクを取得する。"""
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM cve_references WHERE cve_id = ? ORDER BY type, fetched_at DESC",
+            (cve_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]

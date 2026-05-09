@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     otx_api_key: Optional[str] = Field(default=None, alias="OTX_API_KEY")
     abuseipdb_api_key: Optional[str] = Field(default=None, alias="ABUSEIPDB_API_KEY")
     nvd_api_key: Optional[str] = Field(default=None, alias="NVD_API_KEY")
+    github_api_token: Optional[str] = Field(default=None, alias="GITHUB_API_TOKEN")
 
     # === Scheduler ===
     scheduler_enabled: bool = Field(default=True, alias="SCHEDULER_ENABLED")
