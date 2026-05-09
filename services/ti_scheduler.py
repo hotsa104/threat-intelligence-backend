@@ -22,6 +22,7 @@ from db.ti_db import (
 from fetchers.ti_kev_fetcher import fetch_cisa_kev
 from fetchers.ti_nvd_client import enrich_with_nvd
 from fetchers.ti_github_fetcher import fetch_github_exploits_batch
+from fetchers.ti_rss_fetcher import fetch_rss_feeds_for_cve
 from services.ti_scoring import score_all
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,32 @@ async def run_sync() -> None:
             logger.info(f"✅ GitHub: {refs_count} exploit links stored")
     except Exception as e:
         logger.warning(f"⚠️ GitHub exploit fetch failed: {e}")
+
+    # ─── RSS フィード記事取得（Phase 2）──────────────────────
+    try:
+        all_cve_ids = [e.get("cveID") for e in kev_entries if e.get("cveID")]
+        if all_cve_ids:
+            logger.info(f"📰 Fetching RSS articles for {len(all_cve_ids)} CVEs...")
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                refs_count = 0
+                for cve_id in all_cve_ids[:50]:  # RSS は最初の50件のみ（時間制限）
+                    articles = await fetch_rss_feeds_for_cve(cve_id, client)
+                    refs = [
+                        {
+                            "type": "article",
+                            "title": art["title"],
+                            "url": art["url"],
+                            "source": art.get("source", "unknown"),
+                            "metadata": art.get("pub_date", ""),
+                        }
+                        for art in articles
+                    ]
+                    if refs:
+                        refs_count += upsert_references(cve_id, refs)
+            logger.info(f"✅ RSS: {refs_count} article links stored")
+    except Exception as e:
+        logger.warning(f"⚠️ RSS fetch failed: {e}")
 
 
 def start_scheduler() -> AsyncIOScheduler:
