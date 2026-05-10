@@ -390,7 +390,7 @@ def kv_get(key: str, db_path: Path = _DB_PATH) -> Optional[str]:
     with get_conn(db_path) as conn:
         row = conn.execute("SELECT value FROM kv_store WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
-
+    )
 
 def kv_set(key: str, value: str, db_path: Path = _DB_PATH) -> None:
     now = datetime.now(timezone.utc).isoformat()
