@@ -127,3 +127,80 @@ async def get_cve_references(cve_id: str):
         "count": len(references),
         "references": references,
     }
+
+
+@router.post("/refresh-references")
+async def refresh_references(
+    priority: str = Query(default="CRITICAL"),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """NVD API から CVE 参照 URL を取得して cve_references に格納する。"""
+    import asyncio
+    import sqlite3
+    from datetime import datetime, timezone
+    from urllib.parse import urlparse
+    import httpx
+    from db.ti_db import _DB_PATH
+    from fetchers.ti_nvd_client import fetch_nvd_cve
+
+    GITHUB_HOSTS = {"github.com", "raw.githubusercontent.com", "gist.github.com"}
+    ADVISORY_HOSTS = {
+        "cisa.gov", "us-cert.gov", "cert.org", "microsoft.com", "support.microsoft.com",
+        "apple.com", "vmware.com", "oracle.com", "redhat.com", "access.redhat.com",
+        "ubuntu.com", "debian.org", "suse.com", "cisco.com", "fortinet.com",
+        "paloaltonetworks.com", "ivanti.com", "jvn.jp", "jvndb.jvn.jp",
+        "portal.msrc.microsoft.com",
+    }
+    SKIP_HOSTS = {"nvd.nist.gov", "cve.mitre.org", "cvedetails.com"}
+
+    def classify_url(url: str, tags: list) -> str | None:
+        try:
+            host = urlparse(url).netloc.lower().lstrip("www.")
+        except Exception:
+            return None
+        if host in SKIP_HOSTS:
+            return None
+        tag_set = {t.lower() for t in tags}
+        if "exploit" in tag_set or "proof of concept" in tag_set or host in GITHUB_HOSTS:
+            return "github"
+        if any(h in host for h in ADVISORY_HOSTS) or "vendor advisory" in tag_set or "patch" in tag_set:
+            return "advisory"
+        return "article"
+
+    conn = sqlite3.connect(str(_DB_PATH))
+    cve_ids = [r[0] for r in conn.execute(
+        "SELECT cve_id FROM cve_entries WHERE priority = ? ORDER BY epss_score DESC LIMIT ?",
+        (priority.upper(), limit),
+    ).fetchall()]
+    conn.close()
+
+    api_key = getattr(settings, "nvd_api_key", None) or None
+    rate_delay = 0.6 if api_key else 6.5
+    total_saved = 0
+    now = datetime.now(timezone.utc).isoformat()
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for i, cve_id in enumerate(cve_ids):
+            try:
+                nvd = await fetch_nvd_cve(cve_id, client, api_key)
+                refs = nvd.get("references", [])
+                conn = sqlite3.connect(str(_DB_PATH))
+                for ref in refs:
+                    url = ref.get("url", "")
+                    ref_type = classify_url(url, ref.get("tags", []))
+                    if not ref_type:
+                        continue
+                    conn.execute(
+                        "INSERT OR IGNORE INTO cve_references (cve_id, type, title, url, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?)",
+                        (cve_id, ref_type, None, url, ref.get("source"), now),
+                    )
+                    if conn.execute("SELECT changes()").fetchone()[0]:
+                        total_saved += 1
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.warning(f"Reference fetch failed for {cve_id}: {e}")
+            if i < len(cve_ids) - 1:
+                await asyncio.sleep(rate_delay)
+
+    return {"status": "ok", "priority": priority, "cves_processed": len(cve_ids), "references_saved": total_saved}
