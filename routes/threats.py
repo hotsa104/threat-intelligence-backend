@@ -112,4 +112,3 @@ async def refresh_threats(max_results: int = Query(default=100, ge=10, le=100)):
 
     added, skipped = upsert_threats(threats)
     return {"fetched": len(threats), "added": added, "skipped": skipped, "since_id": since_id, "newest_id": newest_id}
-
