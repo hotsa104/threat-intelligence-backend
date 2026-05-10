@@ -57,9 +57,21 @@ CREATE TABLE IF NOT EXISTS cve_references (
     UNIQUE (cve_id, url)
 );
 
+CREATE TABLE IF NOT EXISTS threats (
+    id              TEXT PRIMARY KEY,
+    text            TEXT NOT NULL,
+    keywords        TEXT,
+    cves            TEXT,
+    timestamp       TEXT,
+    url             TEXT,
+    source          TEXT DEFAULT 'x',
+    fetched_at      TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_priority ON cve_entries(priority);
 CREATE INDEX IF NOT EXISTS idx_enriched ON cve_entries(enriched_at);
 CREATE INDEX IF NOT EXISTS idx_cve_references ON cve_references(cve_id);
+CREATE INDEX IF NOT EXISTS idx_threats_ts ON threats(timestamp);
 """
 
 
@@ -300,3 +312,96 @@ def get_references(cve_id: str, db_path: Path = _DB_PATH) -> list[dict]:
             (cve_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def upsert_threats(threats: list[dict], db_path: Path = _DB_PATH) -> tuple[int, int]:
+    """threats を DB に upsert し (added, skipped) を返す。"""
+    import json
+    added = skipped = 0
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn(db_path) as conn:
+        for t in threats:
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO threats
+                       (id, text, keywords, cves, timestamp, url, source, fetched_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        t["id"], t["text"],
+                        json.dumps(t.get("keywords", []), ensure_ascii=False),
+                        json.dumps(t.get("cves", []), ensure_ascii=False),
+                        t.get("timestamp"), t.get("url"), t.get("source", "x"), now,
+                    ),
+                )
+                if conn.execute("SELECT changes()").fetchone()[0]:
+                    added += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                logger.warning(f"threats upsert error {t.get('id')}: {e}")
+    return added, skipped
+
+
+def query_threats(
+    keyword: str | None = None,
+    cve: str | None = None,
+    query: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db_path: Path = _DB_PATH,
+) -> tuple[list[dict], int]:
+    """threats テーブルを検索して (rows, total) を返す。"""
+    import json
+    conditions, params = [], []
+    if keyword:
+        conditions.append("keywords LIKE ?")
+        params.append(f"%{keyword}%")
+    if cve:
+        conditions.append("cves LIKE ?")
+        params.append(f"%{cve}%")
+    if query:
+        conditions.append("text LIKE ?")
+        params.append(f"%{query}%")
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    with get_conn(db_path) as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM threats {where}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT * FROM threats {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["keywords"] = json.loads(d.get("keywords") or "[]")
+        d["cves"]     = json.loads(d.get("cves") or "[]")
+        results.append(d)
+    return results, total
+
+
+def get_threat_categories(db_path: Path = _DB_PATH) -> dict[str, int]:
+    """脅威カテゴリ別件数を返す（ランサムウェア・高EPSS・高優先度など）。"""
+    with get_conn(db_path) as conn:
+        # ランサムウェア関連（ransomware_use が'Yes'か空でない値）
+        ransomware = conn.execute(
+            "SELECT COUNT(*) FROM cve_entries WHERE ransomware_use IN ('Yes', 'yes', 'Y', 'y', 'true', 'True', '1')"
+        ).fetchone()[0]
+
+        # 高EPSS（エクスプロイト可能性が高い）
+        high_epss = conn.execute(
+            "SELECT COUNT(*) FROM cve_entries WHERE epss_score >= 0.8"
+        ).fetchone()[0]
+
+        # クリティカル・優先度が高い
+        critical = conn.execute(
+            "SELECT COUNT(*) FROM cve_entries WHERE priority IN ('CRITICAL', 'HIGH')"
+        ).fetchone()[0]
+
+    categories = {
+        "ransomware": max(ransomware, 0),
+        "exploit_ready": max(high_epss, 0),
+        "critical_high": max(critical, 0),
+    }
+
+    return categories

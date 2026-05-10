@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from config import settings
-from db.ti_db import get_last_sync, get_priority_counts, query_entries, get_references
+from db.ti_db import get_last_sync, get_priority_counts, query_entries, get_references, get_threat_categories
 from fetchers.ti_kev_fetcher import fetch_cisa_kev
 from fetchers.ti_nvd_client import enrich_with_nvd
 from services.ti_scoring import score_all
@@ -44,13 +44,15 @@ def _normalize(row: dict) -> dict:
 
 @router.get("/stats")
 async def vulnerability_stats():
-    """優先度別件数・最終同期情報を返す。"""
+    """優先度別件数・脅威カテゴリ・最終同期情報を返す。"""
     counts = get_priority_counts()
+    categories = get_threat_categories()
     last_sync = get_last_sync()
     total = sum(counts.values())
     return {
         "total": total,
         "priority_counts": counts,
+        "threat_categories": categories,
         "last_sync": last_sync,
     }
 
