@@ -386,7 +386,7 @@ def query_threats(
         results.append(d)
     return results, total
 
-ef kv_get(key: str, db_path: Path = _DB_PATH) -> Optional[str]:
+def kv_get(key: str, db_path: Path = _DB_PATH) -> Optional[str]:
     with get_conn(db_path) as conn:
         row = conn.execute("SELECT value FROM kv_store WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
