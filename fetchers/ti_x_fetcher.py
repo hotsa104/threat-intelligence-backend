@@ -82,11 +82,14 @@ async def fetch_x_threats(
     max_results: int = 100,
     next_token: Optional[str] = None,
 ) -> tuple[list[dict], Optional[str]]:
+    since_id: Optional[str] = None,
+) -> tuple[list[dict], Optional[str], Optional[str]]:
     """
     X API v2 で最新の脅威インテルツイートを取得する。
 
     Returns:
         (threats_list, next_token) — next_token は次ページ取得用
+        (threats_list, next_token, newest_id) — newest_id は次回の since_id に使う
     """
     headers = {"Authorization": f"Bearer {bearer_token}"}
     params: dict[str, Any] = {
@@ -97,6 +100,8 @@ async def fetch_x_threats(
     }
     if next_token:
         params["next_token"] = next_token
+    if since_id:
+        params["since_id"] = since_id
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
