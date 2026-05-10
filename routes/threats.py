@@ -7,9 +7,11 @@ import logging
 from typing import Optional
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from db.ti_db import query_threats
+from config import settings
+from db.ti_db import query_threats, upsert_threats
+from fetchers.ti_x_fetcher import fetch_x_threats
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/threats", tags=["threats"])
@@ -89,3 +91,19 @@ async def list_threats(
         filtered = [t for t in filtered if query.lower() in t["text"].lower()]
 
     return {"total": len(filtered), "count": len(filtered[offset:offset+limit]), "offset": offset, "data": filtered[offset:offset+limit]}
+
+@router.post("/refresh")
+async def refresh_threats(max_results: int = Query(default=100, ge=10, le=100)):
+    """X API からリアルタイムで脅威ツイートを取得して DB に保存する。"""
+    token = settings.x_bearer_token
+    if not token:
+        raise HTTPException(status_code=503, detail="X_BEARER_TOKEN が設定されていません。")
+
+    try:
+        threats, _ = await fetch_x_threats(token, max_results=max_results)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    added, skipped = upsert_threats(threats)
+    return {"fetched": len(threats), "added": added, "skipped": skipped}
+    
