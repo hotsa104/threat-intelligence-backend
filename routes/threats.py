@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
 
 from config import settings
-from db.ti_db import query_threats, upsert_threats
+from db.ti_db import kv_get, kv_set, query_threats, upsert_threats
 from fetchers.ti_x_fetcher import fetch_x_threats
 
 logger = logging.getLogger(__name__)
@@ -92,18 +92,24 @@ async def list_threats(
 
     return {"total": len(filtered), "count": len(filtered[offset:offset+limit]), "offset": offset, "data": filtered[offset:offset+limit]}
 
+
 @router.post("/refresh")
 async def refresh_threats(max_results: int = Query(default=100, ge=10, le=100)):
-    """X API からリアルタイムで脅威ツイートを取得して DB に保存する。"""
+    """X API から差分の脅威ツイートを取得して DB に保存する。"""
     token = settings.x_bearer_token
     if not token:
         raise HTTPException(status_code=503, detail="X_BEARER_TOKEN が設定されていません。")
 
+    since_id = kv_get("x_threats_since_id")
+
     try:
-        threats, _ = await fetch_x_threats(token, max_results=max_results)
+        threats, _, newest_id = await fetch_x_threats(token, max_results=max_results, since_id=since_id)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+    if newest_id:
+        kv_set("x_threats_since_id", newest_id)
+
     added, skipped = upsert_threats(threats)
-    return {"fetched": len(threats), "added": added, "skipped": skipped}
-    
+    return {"fetched": len(threats), "added": added, "skipped": skipped, "since_id": since_id, "newest_id": newest_id}
+
