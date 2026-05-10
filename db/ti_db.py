@@ -68,6 +68,13 @@ CREATE TABLE IF NOT EXISTS threats (
     fetched_at      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS kv_store (
+    key             TEXT PRIMARY KEY,
+    value           TEXT NOT NULL,
+    updated_at      TEXT
+);
+
+
 CREATE INDEX IF NOT EXISTS idx_priority ON cve_entries(priority);
 CREATE INDEX IF NOT EXISTS idx_enriched ON cve_entries(enriched_at);
 CREATE INDEX IF NOT EXISTS idx_cve_references ON cve_references(cve_id);
@@ -379,6 +386,19 @@ def query_threats(
         results.append(d)
     return results, total
 
+ef kv_get(key: str, db_path: Path = _DB_PATH) -> Optional[str]:
+    with get_conn(db_path) as conn:
+        row = conn.execute("SELECT value FROM kv_store WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def kv_set(key: str, value: str, db_path: Path = _DB_PATH) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn(db_path) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)",
+            (key, value, now),
+        )
 
 def get_threat_categories(db_path: Path = _DB_PATH) -> dict[str, int]:
     """脅威カテゴリ別件数を返す（ランサムウェア・高EPSS・高優先度など）。"""
