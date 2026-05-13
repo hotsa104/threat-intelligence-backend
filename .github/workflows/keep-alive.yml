@@ -2,7 +2,7 @@ name: Keep Render Alive
 
 on:
   schedule:
-    - cron: '*/14 * * * *'  # 14分ごとに実行（Renderのスリープは30分無活動で発生）
+    - cron: '*/8 * * * *'  # 8分ごとに実行（Renderのスリープ30分無活動に対応）
   workflow_dispatch:  # 手動実行も可能
 
 jobs:
