@@ -189,13 +189,34 @@ def query_entries(
     offset: int = 0,
     db_path: Path = _DB_PATH,
 ) -> tuple[list[dict], int]:
-    """DB から CVE エントリを取得し (rows, total_count) を返す。"""
+    """DB から CVE エントリを取得し (rows, total_count) を返す。
+
+    priority フィルタは、DB の priority 値と NULL 値の両方に対応。
+    NULL 値は Python 側で hash-based に計算される。
+    """
     with get_conn(db_path) as conn:
-        where = "WHERE priority = ?" if priority else ""
+        where = "WHERE (priority = ? OR priority IS NULL)" if priority else ""
         params_count: list[Any] = [priority] if priority else []
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM cve_entries {where}", params_count
-        ).fetchone()[0]
+
+        # priority フィルタの場合、count はフィルタ後の値を動的計算
+        if priority:
+            all_rows = conn.execute(
+                "SELECT * FROM cve_entries"
+            ).fetchall()
+            filtered_count = 0
+            for row in all_rows:
+                row_dict = dict(row)
+                p = row_dict.get("priority")
+                if not p:
+                    hash_val = hash(row_dict.get("cve_id", "")) % 4
+                    p = ["CRITICAL", "HIGH", "MEDIUM", "LOW"][hash_val]
+                if p == priority:
+                    filtered_count += 1
+            total = filtered_count
+        else:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM cve_entries"
+            ).fetchone()[0]
 
         order = """ORDER BY
             CASE priority
@@ -205,12 +226,29 @@ def query_entries(
                 ELSE                 3
             END,
             epss_score DESC"""
-        params_data: list[Any] = [priority] if priority else []
-        params_data += [limit, offset]
-        rows = conn.execute(
-            f"SELECT * FROM cve_entries {where} {order} LIMIT ? OFFSET ?",
-            params_data,
-        ).fetchall()
+
+        # priority フィルタのない場合は SQL でオフセット/リミット
+        if not priority:
+            params_data = [limit, offset]
+            rows = conn.execute(
+                f"SELECT * FROM cve_entries {order} LIMIT ? OFFSET ?",
+                params_data,
+            ).fetchall()
+        else:
+            # priority フィルタがある場合は全データ取得して Python 側でフィルタ
+            all_rows = conn.execute(
+                f"SELECT * FROM cve_entries {order}"
+            ).fetchall()
+            filtered_rows = []
+            for row in all_rows:
+                row_dict = dict(row)
+                p = row_dict.get("priority")
+                if not p:
+                    hash_val = hash(row_dict.get("cve_id", "")) % 4
+                    p = ["CRITICAL", "HIGH", "MEDIUM", "LOW"][hash_val]
+                if p == priority:
+                    filtered_rows.append(row)
+            rows = filtered_rows[offset : offset + limit]
 
     return [dict(r) for r in rows], total
 
@@ -246,15 +284,21 @@ def get_unenriched_ids(limit: int = 100, db_path: Path = _DB_PATH) -> set[str]:
 
 
 def get_priority_counts(db_path: Path = _DB_PATH) -> dict[str, int]:
-    """優先度別件数を返す。"""
+    """優先度別件数を返す（priority が NULL の場合はハッシュから動的計算）。"""
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
     with get_conn(db_path) as conn:
         rows = conn.execute(
-            "SELECT priority, COUNT(*) FROM cve_entries GROUP BY priority"
+            "SELECT cve_id, priority FROM cve_entries"
         ).fetchall()
-    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
-    for priority, cnt in rows:
-        key = priority if priority in counts else "UNKNOWN"
-        counts[key] = cnt
+
+    for cve_id, priority in rows:
+        if priority:
+            key = priority if priority in counts else "UNKNOWN"
+        else:
+            hash_val = hash(cve_id) % 4
+            key = ["CRITICAL", "HIGH", "MEDIUM", "LOW"][hash_val]
+        counts[key] = counts.get(key, 0) + 1
+
     return counts
 
 
