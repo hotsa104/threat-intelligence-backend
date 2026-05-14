@@ -1,0 +1,20 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    - cron: '*/8 * * * *'  # 8分ごとに実行（Renderのスリープ30分無活動に対応）
+  workflow_dispatch:  # 手動実行も可能
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Backend
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://threat-intelligence-backend-eid2.onrender.com/health)
+          echo "Response Code: $response"
+          if [ "$response" = "200" ]; then
+            echo "✅ Keep-Alive ping sent successfully"
+          else
+            echo "⚠️ Keep-Alive ping returned status $response"
+          fi
