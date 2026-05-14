@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from config import settings
-from db.ti_db import get_last_sync, get_priority_counts, query_entries, get_references, get_threat_categories
+from db.ti_db import get_last_sync, get_priority_counts, query_entries, get_references, get_threat_categories, get_cve_trend, get_ransomware_count
 from fetchers.ti_kev_fetcher import fetch_cisa_kev
 from fetchers.ti_nvd_client import enrich_with_nvd
 from services.ti_scoring import score_all, calculate_priority
@@ -58,12 +58,16 @@ async def vulnerability_stats():
     counts = get_priority_counts()
     categories = get_threat_categories()
     last_sync = get_last_sync()
+    trend = get_cve_trend(30)
+    ransomware_count = get_ransomware_count()
     total = sum(counts.values())
     return {
         "total": total,
         "priority_counts": counts,
         "threat_categories": categories,
         "last_sync": last_sync,
+        "trend": trend,
+        "ransomware_count": ransomware_count,
     }
 
 

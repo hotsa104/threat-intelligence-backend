@@ -91,8 +91,10 @@ def init_db(db_path: Path = _DB_PATH) -> None:
 
 @contextmanager
 def get_conn(db_path: Path = _DB_PATH) -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")   # 書き込み中も読み取り可能
+    conn.execute("PRAGMA busy_timeout=5000")  # ロック待ち最大5秒
     try:
         yield conn
         conn.commit()
@@ -225,6 +227,7 @@ def query_entries(
                 WHEN 'MEDIUM'   THEN 2
                 ELSE                 3
             END,
+            published DESC,
             epss_score DESC"""
 
         # priority フィルタのない場合は SQL でオフセット/リミット
@@ -261,17 +264,35 @@ def get_existing_cve_ids(db_path: Path = _DB_PATH) -> set[str]:
 
 
 def get_cve_ids_without_github_refs(limit: int = 50, db_path: Path = _DB_PATH) -> set[str]:
-    """GitHub PoC リンクが未取得の CVE ID を返す（差分取得用）。"""
+    """GitHub PoC リンクが未取得の CVE ID を優先度順（CRITICAL→LOW）で返す。"""
+    priority_order = "CASE priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END"
     with get_conn(db_path) as conn:
         rows = conn.execute(
-            """SELECT cve_id FROM cve_entries
+            f"""SELECT cve_id FROM cve_entries
                WHERE cve_id NOT IN (
                    SELECT DISTINCT cve_id FROM cve_references WHERE type = 'github'
                )
+               ORDER BY {priority_order}, epss_score DESC
                LIMIT ?""",
             (limit,),
         ).fetchall()
     return {r[0] for r in rows}
+
+
+def get_cve_ids_without_article_refs(limit: int = 50, db_path: Path = _DB_PATH) -> list[str]:
+    """RSS 記事リンクが未取得の CVE ID を優先度順で返す。"""
+    priority_order = "CASE priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END"
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            f"""SELECT cve_id FROM cve_entries
+               WHERE cve_id NOT IN (
+                   SELECT DISTINCT cve_id FROM cve_references WHERE type = 'article'
+               )
+               ORDER BY {priority_order}, epss_score DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [r[0] for r in rows]
 
 
 def get_unenriched_ids(limit: int = 100, db_path: Path = _DB_PATH) -> set[str]:
@@ -443,19 +464,27 @@ def kv_set(key: str, value: str, db_path: Path = _DB_PATH) -> None:
             (key, value, now),
         )
 
-def kv_get(key: str, db_path: Path = _DB_PATH) -> Optional[str]:
+
+def get_cve_trend(days: int = 30, db_path: Path = _DB_PATH) -> list[dict]:
+    """過去 N 日間の日別 CVE 追加件数を返す。"""
     with get_conn(db_path) as conn:
-        row = conn.execute("SELECT value FROM kv_store WHERE key = ?", (key,)).fetchone()
-    return row[0] if row else None
+        rows = conn.execute(
+            f"""SELECT substr(date_added, 1, 10) as day, COUNT(*) as count
+                FROM cve_entries
+                WHERE date_added >= date('now', '-{days} days')
+                GROUP BY day
+                ORDER BY day""",
+        ).fetchall()
+    return [{"date": r[0], "count": r[1]} for r in rows]
 
 
-def kv_set(key: str, value: str, db_path: Path = _DB_PATH) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+def get_ransomware_count(db_path: Path = _DB_PATH) -> int:
+    """ランサムウェア関連 CVE 件数を返す（CISA KEV: ransomware_use = 'Known'）。"""
     with get_conn(db_path) as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)",
-            (key, value, now),
-        )
+        row = conn.execute(
+            "SELECT COUNT(*) FROM cve_entries WHERE ransomware_use = 'Known'"
+        ).fetchone()
+    return row[0] if row else 0
 
 
 def get_threat_categories(db_path: Path = _DB_PATH) -> dict[str, int]:
